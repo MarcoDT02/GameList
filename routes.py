@@ -1,113 +1,152 @@
-from flask import Blueprint, request, jsonify
-from models import db, User, Game
+from flask import Blueprint, abort, jsonify, request
+from models import Game, User, db
+from schemas import (
+    GameCreateSchema,
+    GameUpdateSchema,
+    UserLoginSchema,
+    UserRegisterSchema,
+)
 
 api_bp = Blueprint("api", __name__, url_prefix="/api")
 
+user_register_schema = UserRegisterSchema()
+user_login_schema = UserLoginSchema()
+game_create_schema = GameCreateSchema()
+game_update_schema = GameUpdateSchema()
+games_list_schema = GameCreateSchema(many=True)
+
 @api_bp.route("/register", methods=["POST"])
 def register():
-    data = request.get_json() or {}
+  data = user_register_schema.load(request.get_json() or {})
 
-    username = data.get("username")
-    password = data.get("password")
+  if User.query.filter_by(username=data["username"]).first():
+    return (
+        jsonify({
+            "error": "Conflict",
+            "message": "Username is already taken.",
+        }),
+        409,
+    )
 
-    if not username or not password:
-        return jsonify({"error": "Username and password are required"}), 400
+  new_user = User(username=data["username"])
+  new_user.set_password(data["password"])
 
-    existing_user = User.query.filter_by(username=username).first()
-    if existing_user:
-        return jsonify({"error": "Username already taken"}), 400
+  db.session.add(new_user)
+  db.session.commit()
 
-    new_user = User(username=username)
-    new_user.set_password(password)
-
-    db.session.add(new_user)
-    db.session.commit()
-
-    return jsonify({"message": "User registered!", "user_id": new_user.id}), 201
-
+  return (
+      jsonify({
+          "message": "User registered successfully!",
+          "user_id": new_user.id,
+      }),
+      201,
+  )
 
 @api_bp.route("/login", methods=["POST"])
 def login():
-    data = request.get_json() or {}
+  data = user_login_schema.load(request.get_json() or {})
 
-    username = data.get("username")
-    password = data.get("password")
+  user = User.query.filter_by(username=data["username"]).first()
 
-    user = User.query.filter_by(username=username).first()
+  if not user or not user.check_password(data["password"]):
+    return (
+        jsonify({
+            "error": "Unauthorized",
+            "message": "Invalid credentials.",
+        }),
+        401,
+    )
 
-    if not user or not user.check_password(password):
-        return jsonify({"error": "Invalid credentials"}), 401
-
-    return jsonify({"message": "Login successful", "user_id": user.id}), 200
+  return (
+      jsonify({
+          "message": "Login successful!",
+          "user_id": user.id,
+          "username": user.username,
+      }),
+      200,
+  )
 
 @api_bp.route("/users/<int:user_id>/games", methods=["GET"])
 def get_games(user_id):
-    user = User.query.get(user_id)
-    if not user:
-        return jsonify({"error": "User not found"}), 404
+  user = User.query.get(user_id)
+  if not user:
+    abort(404, description=f"User with id {user_id} was not found.")
 
-    user_games = [game.to_dict() for game in user.games]
-    return jsonify(user_games), 200
-
+  return (
+      jsonify({
+          "count": len(user.games),
+          "games": games_list_schema.dump(user.games),
+      }),
+      200,
+  )
 
 @api_bp.route("/users/<int:user_id>/games", methods=["POST"])
 def add_game(user_id):
-    user = User.query.get(user_id)
-    if not user:
-        return jsonify({"error": "User not found"}), 404
+  user = User.query.get(user_id)
+  if not user:
+    abort(404, description=f"User with id {user_id} was not found.")
 
-    data = request.get_json() or {}
-    title = data.get("title")
-    status = data.get("status")
-    rating = data.get("rating")
+  data = game_create_schema.load(request.get_json() or {})
 
-    if not title or not status:
-        return jsonify({"error": "Title and status are required"}), 400
+  new_game = Game(
+      user_id=user.id,
+      title=data["title"],
+      status=data["status"],
+      rating=data.get("rating"),
+  )
 
-    valid_statuses = ["backlog", "playing", "completed"]
-    if status not in valid_statuses:
-        return jsonify({"error": "Invalid status"}), 400
+  db.session.add(new_game)
+  db.session.commit()
 
-    new_game = Game(
-        user_id=user_id,
-        title=title,
-        status=status,
-        rating=rating
-    )
-
-    db.session.add(new_game)
-    db.session.commit()
-
-    return jsonify(new_game.to_dict()), 201
-
+  return (
+      jsonify({
+          "message": "Game added successfully!",
+          "game": game_create_schema.dump(new_game),
+      }),
+      201,
+  )
 
 @api_bp.route("/users/<int:user_id>/games/<int:game_id>", methods=["PUT"])
 def update_game(user_id, game_id):
-    game = Game.query.filter_by(id=game_id, user_id=user_id).first()
-    if not game:
-        return jsonify({"error": "Game not found"}), 404
+  game = Game.query.filter_by(id=game_id, user_id=user_id).first()
+  if not game:
+    abort(
+        404,
+        description=(
+            f"Game with id {game_id} for user {user_id} was not found."
+        ),
+    )
 
-    data = request.get_json() or {}
+  data = game_update_schema.load(request.get_json() or {})
 
-    if "status" in data:
-        if data["status"] not in ["backlog", "playing", "completed"]:
-            return jsonify({"error": "Invalid status"}), 400
-        game.status = data["status"]
+  if "status" in data:
+    game.status = data["status"]
 
-    if "rating" in data:
-        game.rating = data["rating"]
+  if "rating" in data:
+    game.rating = data["rating"]
 
-    db.session.commit()
-    return jsonify(game.to_dict()), 200
+  db.session.commit()
 
+  return (
+      jsonify({
+          "message": "Game updated successfully!",
+          "game": game_create_schema.dump(game),
+      }),
+      200,
+  )
 
 @api_bp.route("/users/<int:user_id>/games/<int:game_id>", methods=["DELETE"])
 def delete_game(user_id, game_id):
-    game = Game.query.filter_by(id=game_id, user_id=user_id).first()
-    if not game:
-        return jsonify({"error": "Game not found"}), 404
+  game = Game.query.filter_by(id=game_id, user_id=user_id).first()
+  if not game:
+    abort(
+        404,
+        description=(
+            f"Game with id {game_id} for user {user_id} was not found."
+        ),
+    )
 
-    db.session.delete(game)
-    db.session.commit()
+  db.session.delete(game)
+  db.session.commit()
 
-    return jsonify({"message": "Game deleted successfully"}), 200
+  return jsonify({"message": "Game deleted successfully!"}), 200
