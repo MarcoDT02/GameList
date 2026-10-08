@@ -1,3 +1,4 @@
+import os
 from errors import register_error_handlers
 from flask import Flask
 from models import db
@@ -5,8 +6,8 @@ from routes import api_bp
 
 app = Flask(__name__)
 
-app.config["SQLALCHEMY_DATABASE_URI"] = (
-    "postgresql://postgres:PASSWORD@localhost:5432/gametracker_db"  # Change PASSWORD -------------------------------
+app.config["SQLALCHEMY_DATABASE_URI"] = os.environ.get(
+    "DATABASE_URL", "postgresql+psycopg2://postgres:PASSWORD@localhost:5432/gametracker_db"
 )
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
