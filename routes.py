@@ -68,7 +68,7 @@ def login():
 
 @api_bp.route("/users/<int:user_id>/games", methods=["GET"])
 def get_games(user_id):
-  user = User.query.get(user_id)
+  user = db.session.get(User, user_id)
   if not user:
     abort(404, description=f"User with id {user_id} was not found.")
 
@@ -82,7 +82,7 @@ def get_games(user_id):
 
 @api_bp.route("/users/<int:user_id>/games", methods=["POST"])
 def add_game(user_id):
-  user = User.query.get(user_id)
+  user = db.session.get(User, user_id)
   if not user:
     abort(404, description=f"User with id {user_id} was not found.")
 
